@@ -46,7 +46,10 @@ defmodule Backend.MixProject do
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:xandra, "~> 0.19"},
+      {:decimal, "~> 2.0"},
+      {:elixir_uuid, "~> 1.2"}
     ]
   end
 

@@ -3,7 +3,6 @@ import { Socket } from "phoenix";
 import { v4 as uuid } from "uuid";
 
 type Message = {
-  id: string;
   sender: string;
   content: string;
 };
@@ -32,6 +31,8 @@ export default function Component() {
       .join()
       .receive("ok", (resp) => {
         console.log("Joined successfully", resp);
+        console.log(resp.messages);
+        setMessages(resp.messages);
       })
       .receive("error", (resp) => {
         console.log("Unable to join", resp);
@@ -45,7 +46,6 @@ export default function Component() {
   const handleSendMessage = () => {
     if (newMessage.trim() !== "" && senderName.trim() !== "") {
       const newMsg: Message = {
-        id: uuid(),
         sender: senderName.trim(),
         content: newMessage.trim(),
       };
