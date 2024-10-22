@@ -11,13 +11,19 @@ defmodule BackendWeb.Router do
   end
 
   pipeline :api do
+    plug CORSPlug
     plug :accepts, ["json"]
   end
 
   scope "/", BackendWeb do
-    pipe_through :browser
+    pipe_through :api
 
-    get "/", PageController, :home
+    post "/register", AuthController, :register
+
+    options "/register", AuthController, :options
+    post "/login", AuthController, :login
+
+    options "/login", AuthController, :options
   end
 
   # Other scopes may use custom stacks.

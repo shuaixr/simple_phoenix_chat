@@ -49,7 +49,10 @@ defmodule Backend.MixProject do
       {:bandit, "~> 1.5"},
       {:xandra, "~> 0.19"},
       {:decimal, "~> 2.0"},
-      {:elixir_uuid, "~> 1.2"}
+      {:elixir_uuid, "~> 1.2"},
+      {:bcrypt_elixir, "~> 3.0"},
+      {:joken, "~> 2.5"},
+      {:cors_plug, "~> 3.0"}
     ]
   end
 

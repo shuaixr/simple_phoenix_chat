@@ -2,6 +2,17 @@ defmodule Backend.Repo do
   use GenServer
 
   @moduledoc """
+  CREATE TABLE users (
+      id uuid PRIMARY KEY,
+      username text,
+      password_hash text,
+      created_at timestamp
+  );
+
+  CREATE TABLE users_by_username (
+      username text PRIMARY KEY,
+      user_id uuid
+  );
   CREATE TABLE messages (
       id uuid,
       room_id text,
@@ -21,23 +32,118 @@ defmodule Backend.Repo do
     {:ok, %{conn: conn}}
   end
 
-  def insert_message(id, room_id, sender, content) do
-    GenServer.call(__MODULE__, {:insert_message, id, room_id, sender, content})
+  def create_user(username, password) do
+    GenServer.call(__MODULE__, {:create_user, username, password})
+  end
+
+  def get_user_by_username(username) do
+    GenServer.call(__MODULE__, {:get_user_by_username, username})
+  end
+
+  def get_user_by_id(user_id) do
+    GenServer.call(__MODULE__, {:get_user_by_id, user_id})
+  end
+
+  def insert_message(id, room_id, sender_id, content) do
+    GenServer.call(__MODULE__, {:insert_message, id, room_id, sender_id, content})
   end
 
   def get_latest_messages(room_id, limit \\ 10) do
     GenServer.call(__MODULE__, {:get_latest_messages, room_id, limit})
   end
 
-  def handle_call({:insert_message, id, room_id, sender, content}, _from, %{conn: conn} = state) do
+  def handle_call({:create_user, username, password}, _from, %{conn: conn} = state) do
+    {:ok, user} = Backend.User.create(username, password)
+
+    case Xandra.execute(conn, "SELECT user_id FROM users_by_username WHERE username = ?", [
+           {"text", username}
+         ]) do
+      {:ok, page} ->
+        # check exist
+        if Enum.empty?(page) do
+          {:ok, _} =
+            Xandra.execute(
+              conn,
+              "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, toTimestamp(now()))",
+              [{"uuid", user.id}, {"text", username}, {"text", user.password_hash}]
+            )
+
+          {:ok, _} =
+            Xandra.execute(
+              conn,
+              "INSERT INTO users_by_username (username, user_id) VALUES (?, ?)",
+              [{"text", username}, {"uuid", user.id}]
+            )
+
+          {:reply, {:ok, user}, state}
+        else
+          {:reply, {:error, :username_taken}, state}
+        end
+
+      _ ->
+        {:reply, {:error, :unknow}, state}
+    end
+  end
+
+  def handle_call({:get_user_by_username, username}, _from, %{conn: conn} = state) do
+    case Xandra.execute(conn, "SELECT user_id FROM users_by_username WHERE username = ?", [
+           {"text", username}
+         ]) do
+      {:ok, %Xandra.Page{} = page} ->
+        case Enum.at(page, 0) do
+          %{"user_id" => user_id} ->
+            case Xandra.execute(conn, "SELECT * FROM users WHERE id = ?", [{"uuid", user_id}]) do
+              {:ok, %Xandra.Page{} = user_page} ->
+                case Enum.at(user_page, 0) do
+                  user_data when not is_nil(user_data) ->
+                    user = %Backend.User{
+                      id: user_data["id"],
+                      username: user_data["username"],
+                      password_hash: user_data["password_hash"]
+                    }
+
+                    {:reply, {:ok, user}, state}
+
+                  _ ->
+                    {:reply, {:error, :user_not_found}, state}
+                end
+
+              _ ->
+                {:reply, {:error, :user_not_found}, state}
+            end
+
+          _ ->
+            {:reply, {:error, :user_not_found}, state}
+        end
+
+      _ ->
+        {:reply, {:error, :user_not_found}, state}
+    end
+  end
+
+  def handle_call({:get_user_by_id, user_id}, _from, %{conn: conn} = state) do
+    case get_user_by_id(conn, user_id) do
+      {:ok, user} ->
+        {:reply, {:ok, user}, state}
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call(
+        {:insert_message, id, room_id, sender_id, content},
+        _from,
+        %{conn: conn} = state
+      ) do
     statement =
-      "INSERT INTO messages (id, room_id, sender, content, timestamp) VALUES (?, ?, ?, ?, toTimestamp(now()))"
+      "INSERT INTO messages (id, room_id, sender_id, content, timestamp) VALUES (?, ?, ?, ?, toTimestamp(now()))"
 
     {:ok, _} =
       Xandra.execute(conn, statement, [
         {"uuid", id},
         {"text", room_id},
-        {"text", sender},
+        {"uuid", sender_id},
         {"text", content}
       ])
 
@@ -46,7 +152,7 @@ defmodule Backend.Repo do
 
   def handle_call({:get_latest_messages, room_id, limit}, _from, %{conn: conn} = state) do
     statement =
-      "SELECT id, sender, content, timestamp FROM messages WHERE room_id = ? ORDER BY timestamp DESC LIMIT ?"
+      "SELECT id, sender_id, content, timestamp FROM messages WHERE room_id = ? ORDER BY timestamp DESC LIMIT ?"
 
     {:ok, %Xandra.Page{} = page} =
       Xandra.execute(conn, statement, [
@@ -58,14 +164,49 @@ defmodule Backend.Repo do
       page
       |> Enum.map(fn %{
                        "id" => id,
-                       "sender" => sender,
+                       "sender_id" => sender_id,
                        "content" => content,
                        "timestamp" => timestamp
                      } ->
-        %{id: id, sender: sender, content: content, timestamp: timestamp}
+        # get sender info
+        case get_user_by_id(conn, sender_id) do
+          {:ok, user} ->
+            %{
+              id: id,
+              sender_id: sender_id,
+              sender: user.username,
+              content: content,
+              timestamp: timestamp
+            }
+
+          _ ->
+            %{
+              id: id,
+              sender_id: sender_id,
+              sender: "Unknown",
+              content: content,
+              timestamp: timestamp
+            }
+        end
       end)
       |> Enum.reverse()
 
     {:reply, messages, state}
+  end
+
+  defp get_user_by_id(conn, user_id) do
+    case Xandra.execute(conn, "SELECT * FROM users WHERE id = ?", [{"uuid", user_id}]) do
+      {:ok, %Xandra.Page{} = user_page} ->
+        case Enum.at(user_page, 0) do
+          %{"username" => username, "id" => id, "password_hash" => password_hash} ->
+            {:ok, %Backend.User{id: id, username: username, password_hash: password_hash}}
+
+          _ ->
+            {:error, :user_not_found}
+        end
+
+      _ ->
+        {:error, :user_not_found}
+    end
   end
 end
