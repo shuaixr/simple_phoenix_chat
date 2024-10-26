@@ -52,6 +52,10 @@ defmodule Backend.Repo do
     GenServer.call(__MODULE__, {:get_latest_messages, room_id, limit})
   end
 
+  def update_password(user_id, old_password, new_password) do
+    GenServer.call(__MODULE__, {:update_password, user_id, old_password, new_password})
+  end
+
   def handle_call({:create_user, username, password}, _from, %{conn: conn} = state) do
     {:ok, user} = Backend.User.create(username, password)
 
@@ -92,24 +96,12 @@ defmodule Backend.Repo do
       {:ok, %Xandra.Page{} = page} ->
         case Enum.at(page, 0) do
           %{"user_id" => user_id} ->
-            case Xandra.execute(conn, "SELECT * FROM users WHERE id = ?", [{"uuid", user_id}]) do
-              {:ok, %Xandra.Page{} = user_page} ->
-                case Enum.at(user_page, 0) do
-                  user_data when not is_nil(user_data) ->
-                    user = %Backend.User{
-                      id: user_data["id"],
-                      username: user_data["username"],
-                      password_hash: user_data["password_hash"]
-                    }
+            case get_user_by_id(conn, user_id) do
+              {:ok, user} ->
+                {:reply, {:ok, user}, state}
 
-                    {:reply, {:ok, user}, state}
-
-                  _ ->
-                    {:reply, {:error, :user_not_found}, state}
-                end
-
-              _ ->
-                {:reply, {:error, :user_not_found}, state}
+              error ->
+                {:reply, error, state}
             end
 
           _ ->
@@ -194,7 +186,36 @@ defmodule Backend.Repo do
     {:reply, messages, state}
   end
 
+  def handle_call(
+        {:update_password, user_id, old_password, new_password},
+        _from,
+        %{conn: conn} = state
+      ) do
+    case get_user_by_id(conn, user_id) do
+      {:ok, user} ->
+        if Backend.User.verify_password(old_password, user.password_hash) do
+          new_password_hash = Backend.User.get_password_hash(new_password)
+          statement = "UPDATE users SET password_hash = ? WHERE id = ?"
+
+          case Xandra.execute(conn, statement, [{"text", new_password_hash}, {"uuid", user_id}]) do
+            {:ok, _} ->
+              {:reply, :ok, state}
+
+            error ->
+              {:reply, error, state}
+          end
+        else
+          {:reply, {:error, :invalid_password}, state}
+        end
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
   defp get_user_by_id(conn, user_id) do
+    IO.inspect(user_id)
+
     case Xandra.execute(conn, "SELECT * FROM users WHERE id = ?", [{"uuid", user_id}]) do
       {:ok, %Xandra.Page{} = user_page} ->
         case Enum.at(user_page, 0) do

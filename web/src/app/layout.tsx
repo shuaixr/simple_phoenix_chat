@@ -31,7 +31,8 @@ export default function RootLayout({
       >
         <div className="flex items-center justify-center w-full gap-2">
           <Link href="/login">Login</Link>/
-          <Link href="/register">Register</Link>/<Link href="/chat">Chat</Link>
+          <Link href="/register">Register</Link>/<Link href="/chat">Chat</Link>/
+          <Link href="/update_password">Update password</Link>
         </div>
         {children}
       </body>

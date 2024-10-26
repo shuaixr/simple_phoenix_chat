@@ -2,7 +2,7 @@ defmodule Backend.User do
   defstruct [:id, :username, :password_hash]
 
   def create(username, password) do
-    password_hash = Bcrypt.hash_pwd_salt(password)
+    password_hash = get_password_hash(password)
     id = UUID.uuid4()
 
     {:ok,
@@ -11,6 +11,10 @@ defmodule Backend.User do
        username: username,
        password_hash: password_hash
      }}
+  end
+
+  def get_password_hash(password) do
+    Bcrypt.hash_pwd_salt(password)
   end
 
   def verify_password(password, password_hash) do

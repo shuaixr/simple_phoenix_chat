@@ -19,11 +19,13 @@ defmodule BackendWeb.Router do
     pipe_through :api
 
     post "/register", AuthController, :register
-
     options "/register", AuthController, :options
-    post "/login", AuthController, :login
 
+    post "/login", AuthController, :login
     options "/login", AuthController, :options
+
+    put "/profile/password", UserController, :update_password
+    options "/profile/password", UserController, :options
   end
 
   # Other scopes may use custom stacks.
